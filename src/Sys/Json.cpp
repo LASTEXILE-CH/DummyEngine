@@ -581,7 +581,7 @@ bool JsElement::Read(std::istream &in) {
         type_ = JsType::Object;
         return reinterpret_cast<JsObject &>(data_).Read(in);
     } else {
-        if (isdigit(c) || c == '-' || c == '+') {
+        if (isdigit(c) || c == '-') {
             new (&data_) JsNumber{};
             type_ = JsType::Number;
             return reinterpret_cast<JsNumber &>(data_).Read(in);
