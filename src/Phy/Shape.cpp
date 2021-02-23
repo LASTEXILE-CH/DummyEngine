@@ -319,6 +319,8 @@ Phy::Bounds Phy::ShapeBox::GetBounds(const Vec3 &pos, const Quat &rot) const {
 
 Phy::real Phy::ShapeBox::GetFastestLinearSpeedDueToRotation(const Vec3 &vel_ang,
                                                             const Vec3 &dir) const {
+                                                            return real(0);
+
     real max_speed = real(0);
     for (int i = 0; i < 8; i++) {
         const Vec3 r = points[i] - center_of_mass_;
@@ -339,7 +341,7 @@ Phy::Vec3 Phy::ShapeBox::Support(const Vec3 &dir, const Vec3 &pos, const Quat &r
     // Find the point that is the furthest in direction
     const Quat inv_rot = Inverse(rot);
     for (int i = 0; i < 8; i++) {
-        Vec3 pt = pos + points[i];
+        Vec3 pt = points[i];
 
         { // Rotate point
             const Quat q = {pt[0], pt[1], pt[2], real(0)};
@@ -349,6 +351,8 @@ Phy::Vec3 Phy::ShapeBox::Support(const Vec3 &dir, const Vec3 &pos, const Quat &r
             pt[1] = rq.y;
             pt[2] = rq.z;
         }
+
+        pt += pos;
 
         const float dist2 = Dot(dir, pt);
         if (dist2 > max_dist2) {
