@@ -94,6 +94,7 @@ Ren::Vec4f fade(const Ren::Vec4f &t) {
 
 #define _MIN(x, y) ((x) < (y) ? (x) : (y))
 #define _MAX(x, y) ((x) < (y) ? (y) : (x))
+#define _ABS(x) ((x) < 0 ? -(x) : (x))
 #define _CLAMP(x, lo, hi) (_MIN(_MAX((x), (lo)), (hi)))
 
 #define _MIN3(x, y, z) _MIN((x), _MIN((y), (z)))
@@ -1179,6 +1180,245 @@ float Ren::PerlinNoise(const Ren::Vec4f &P, const Ren::Vec4f &rep) {
         Mix(Vec2f{n_zw[0], n_zw[1]}, Vec2f{n_zw[2], n_zw[3]}, fade_xyzw[1]);
     const float n_xyzw = Mix(n_yzw[0], n_yzw[1], fade_xyzw[0]);
     return 2.2f * n_xyzw;
+}
+
+//
+// https://software.intel.com/sites/default/files/23/1d/324337_324337.pdf
+//
+
+namespace Ren {
+void Extract4x4Block(const uint8_t src[], const int stride, const int channels,
+                     uint8_t dst[64]) {
+    if (channels == 4) {
+        for (int j = 0; j < 4; j++) {
+            memcpy(&dst[j * 4 * 4], src, 4 * 4);
+            src += stride;
+        }
+    } else if (channels == 3) {
+        for (int j = 0; j < 4; j++) {
+            for (int i = 0; i < 4; i++) {
+                memcpy(&dst[i * 4], &src[i * 3], 3);
+                dst[i * 4 + 3] = 255;
+            }
+            dst += 4 * 4;
+            src += stride;
+        }
+    }
+}
+
+int ColorDistance(const uint8_t c1[3], const uint8_t c2[3]) {
+    // euclidean distance
+    return (c1[0] - c2[0]) * (c1[0] - c2[0]) + (c1[1] - c2[1]) * (c1[1] - c2[1]) +
+           (c1[2] - c2[2]) * (c1[2] - c2[2]);
+}
+
+int ColorLumaApprox(const uint8_t color[3]) {
+    return int(color[0] + color[1] * 2 + color[2]);
+}
+
+uint16_t rgb888_to_rgb565(const uint8_t color[3]) {
+    return ((color[0] >> 3) << 11) | ((color[1] >> 2) << 5) | (color[2] >> 3);
+}
+
+void swap_rgb(uint8_t c1[3], uint8_t c2[3]) {
+    uint8_t tm[3];
+    memcpy(tm, c1, 3);
+    memcpy(c1, c2, 3);
+    memcpy(c2, tm, 3);
+}
+
+void GetMinMaxColorByDistance(const uint8_t block[64], uint8_t min_color[4],
+                              uint8_t max_color[4]) {
+    int max_dist = -1;
+
+    for (int i = 0; i < 64 - 4; i += 4) {
+        for (int j = i + 4; j < 64; j += 4) {
+            const int dist = ColorDistance(&block[i], &block[j]);
+            if (dist > max_dist) {
+                max_dist = dist;
+                memcpy(min_color, &block[i], 3);
+                memcpy(max_color, &block[j], 3);
+            }
+        }
+    }
+
+    if (rgb888_to_rgb565(max_color) < rgb888_to_rgb565(min_color)) {
+        swap_rgb(min_color, max_color);
+    }
+}
+
+void GetMinMaxColorByLuma(const uint8_t block[64], uint8_t min_color[4],
+                          uint8_t max_color[4]) {
+    int max_luma = -1, min_luma = std::numeric_limits<int>::max();
+
+    for (int i = 0; i < 16; i++) {
+        const int luma = ColorLumaApprox(&block[i * 4]);
+        if (luma > max_luma) {
+            memcpy(max_color, &block[i * 4], 3);
+            max_luma = luma;
+        }
+        if (luma < min_luma) {
+            memcpy(min_color, &block[i * 4], 3);
+            min_luma = luma;
+        }
+    }
+
+    if (rgb888_to_rgb565(max_color) < rgb888_to_rgb565(min_color)) {
+        swap_rgb(min_color, max_color);
+    }
+}
+
+void GetMinMaxColorByBBox(const uint8_t block[64], uint8_t min_color[4],
+                          uint8_t max_color[4]) {
+    min_color[0] = min_color[1] = min_color[2] = 255;
+    max_color[0] = max_color[1] = max_color[2] = 0;
+
+    for (int i = 0; i < 16; i++) {
+        if (block[i * 4 + 0] < min_color[0]) {
+            min_color[0] = block[i * 4 + 0];
+        }
+        if (block[i * 4 + 1] < min_color[1]) {
+            min_color[1] = block[i * 4 + 1];
+        }
+        if (block[i * 4 + 2] < min_color[2]) {
+            min_color[2] = block[i * 4 + 2];
+        }
+        if (block[i * 4 + 0] > max_color[0]) {
+            max_color[0] = block[i * 4 + 0];
+        }
+        if (block[i * 4 + 1] > max_color[1]) {
+            max_color[1] = block[i * 4 + 1];
+        }
+        if (block[i * 4 + 2] > max_color[2]) {
+            max_color[2] = block[i * 4 + 2];
+        }
+    }
+
+    // offset bbox inside by 1/16 of it's dimentions, this improves MSR (???)
+
+    const uint8_t inset[] = {uint8_t((max_color[0] - min_color[0]) / 16),
+                             uint8_t((max_color[1] - min_color[1]) / 16),
+                             uint8_t((max_color[2] - min_color[2]) / 16)};
+
+    min_color[0] = (min_color[0] + inset[0] <= 255) ? min_color[0] + inset[0] : 255;
+    min_color[1] = (min_color[1] + inset[1] <= 255) ? min_color[1] + inset[1] : 255;
+    min_color[2] = (min_color[2] + inset[2] <= 255) ? min_color[2] + inset[2] : 255;
+
+    max_color[0] = (max_color[0] >= inset[0]) ? max_color[0] - inset[0] : 0;
+    max_color[1] = (max_color[1] >= inset[1]) ? max_color[1] - inset[1] : 0;
+    max_color[2] = (max_color[2] >= inset[2]) ? max_color[2] - inset[2] : 0;
+}
+
+void push_u8(const uint8_t v, uint8_t *&out_data) { (*out_data++) = v; }
+
+void push_u16(const uint16_t v, uint8_t *&out_data) {
+    (*out_data++) = (v >> 0) & 0xFF;
+    (*out_data++) = (v >> 8) & 0xFF;
+}
+
+void push_u32(const uint32_t v, uint8_t *&out_data) {
+    (*out_data++) = (v >> 0) & 0xFF;
+    (*out_data++) = (v >> 8) & 0xFF;
+    (*out_data++) = (v >> 16) & 0xFF;
+    (*out_data++) = (v >> 24) & 0xFF;
+}
+
+void push_color_indices(const uint8_t block[64], const uint8_t min_color[3],
+                        const uint8_t max_color[3], uint8_t *&out_data) {
+    uint8_t color_palette[4][4];
+
+    // get two initial colors (as if they were converted to rgb565 and back
+    // note: last 3 bits are replicated from first 3 bits, because gpu does this (???)
+    color_palette[0][0] = (max_color[0] & 0b11111000) | (max_color[0] >> 5u);
+    color_palette[0][1] = (max_color[1] & 0b11111100) | (max_color[1] >> 6u);
+    color_palette[0][2] = (max_color[2] & 0b11111000) | (max_color[2] >> 5u);
+    color_palette[1][0] = (min_color[0] & 0b11111000) | (min_color[0] >> 5u);
+    color_palette[1][1] = (min_color[1] & 0b11111100) | (min_color[1] >> 6u);
+    color_palette[1][2] = (min_color[2] & 0b11111000) | (min_color[2] >> 5u);
+    // get two interpolated colors
+    color_palette[2][0] = (2 * color_palette[0][0] + 1 * color_palette[1][0]) / 3;
+    color_palette[2][1] = (2 * color_palette[0][1] + 1 * color_palette[1][1]) / 3;
+    color_palette[2][2] = (2 * color_palette[0][2] + 1 * color_palette[1][2]) / 3;
+    color_palette[3][0] = (1 * color_palette[0][0] + 2 * color_palette[1][0]) / 3;
+    color_palette[3][1] = (1 * color_palette[0][1] + 2 * color_palette[1][1]) / 3;
+    color_palette[3][2] = (1 * color_palette[0][2] + 2 * color_palette[1][2]) / 3;
+
+    // division by 3 can be 'emulated' with:
+    // y = (1 << 16) / 3 + 1
+    // x = (x * y) >> 16          -->      pmulhw x, y
+
+    // find best indices for each pixel in a block
+    uint32_t result_indices = 0;
+
+#if 0   // use euclidian distance (slower)
+        uint32_t palette_indices[16];
+        for (int i = 0; i < 16; i++) {
+            uint32_t min_dist = std::numeric_limits<uint32_t>::max();
+            for (int j = 0; j < 4; j++) {
+                const uint32_t dist = ColorDistance(&block[i * 4], &color_palette[j][0]);
+                if (dist < min_dist) {
+                    palette_indices[i] = j;
+                    min_dist = dist;
+                }
+            }
+        }
+
+        // pack indices in 2 bits each
+        for (int i = 0; i < 16; i++) {
+            result_indices |= (palette_indices[i] << uint32_t(i * 2));
+        }
+#elif 1 // use absolute differences (faster)
+    for (int i = 15; i >= 0; i--) {
+        const int c0 = block[i * 4 + 0];
+        const int c1 = block[i * 4 + 1];
+        const int c2 = block[i * 4 + 2];
+
+        const int d0 = _ABS(color_palette[0][0] - c0) + _ABS(color_palette[0][1] - c1) +
+                       _ABS(color_palette[0][2] - c2);
+        const int d1 = _ABS(color_palette[1][0] - c0) + _ABS(color_palette[1][1] - c1) +
+                       _ABS(color_palette[1][2] - c2);
+        const int d2 = _ABS(color_palette[2][0] - c0) + _ABS(color_palette[2][1] - c1) +
+                       _ABS(color_palette[2][2] - c2);
+        const int d3 = _ABS(color_palette[3][0] - c0) + _ABS(color_palette[3][1] - c1) +
+                       _ABS(color_palette[3][2] - c2);
+
+        const int b0 = d0 > d3;
+        const int b1 = d1 > d2;
+        const int b2 = d0 > d2;
+        const int b3 = d1 > d3;
+        const int b4 = d2 > d3;
+
+        const int x0 = b1 & b2;
+        const int x1 = b0 & b3;
+        const int x2 = b0 & b4;
+
+        result_indices |= (x2 | ((x0 | x1) << 1)) << (i * 2);
+    }
+#endif
+
+    push_u32(result_indices, out_data);
+}
+
+} // namespace Ren
+
+void Ren::CompressImageDXT1(const uint8_t img_src[], const int w, const int h,
+                            const int channels, uint8_t img_dst[]) {
+    for (int j = 0; j < h; j += 4, img_src += w * 4 * channels) {
+        for (int i = 0; i < w; i += 4) {
+            uint8_t block[64];
+            Extract4x4Block(&img_src[i * channels], w * channels, channels, block);
+
+            uint8_t min_color[4], max_color[4];
+            GetMinMaxColorByDistance(block, min_color, max_color);
+            // GetMinMaxColorByLuma(block, min_color, max_color);
+            // GetMinMaxColorByBBox(block, min_color, max_color);
+
+            push_u16(rgb888_to_rgb565(max_color), img_dst);
+            push_u16(rgb888_to_rgb565(min_color), img_dst);
+
+            push_color_indices(block, min_color, max_color, img_dst);
+        }
+    }
 }
 
 #undef _MIN

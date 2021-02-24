@@ -121,4 +121,11 @@ void CopyYChannel_32px(const uint8_t *y_src, int y_stride, int w, int h, uint8_t
 
 void InterleaveUVChannels_16px(const uint8_t *u_src, const uint8_t *v_src, int u_stride,
                                int v_stride, int w, int h, uint8_t *uv_dst);
+
+//
+// DXT compression
+//
+
+void CompressImageDXT1(const uint8_t img_src[], int w, int h, int channels, uint8_t img_dst[]);
+void CompressImageDXT5();
 } // namespace Ren
