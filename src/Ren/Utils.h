@@ -13,14 +13,17 @@ std::unique_ptr<uint8_t[]> ReadTGAFile(const void *data, int &w, int &h,
 void RGBMDecode(const uint8_t rgbm[4], float out_rgb[3]);
 void RGBMEncode(const float rgb[3], uint8_t out_rgbm[4]);
 
-std::unique_ptr<float[]> ConvertRGBE_to_RGB32F(const uint8_t *image_data, int w, int h);
-std::unique_ptr<uint16_t[]> ConvertRGBE_to_RGB16F(const uint8_t *image_data, int w,
+std::unique_ptr<float[]> ConvertRGBE_to_RGB32F(const uint8_t image_data[], int w, int h);
+std::unique_ptr<uint16_t[]> ConvertRGBE_to_RGB16F(const uint8_t image_data[], int w,
                                                   int h);
 
-std::unique_ptr<uint8_t[]> ConvertRGB32F_to_RGBE(const float *image_data, int w, int h,
+std::unique_ptr<uint8_t[]> ConvertRGB32F_to_RGBE(const float image_data[], int w, int h,
                                                  int channels);
-std::unique_ptr<uint8_t[]> ConvertRGB32F_to_RGBM(const float *image_data, int w, int h,
+std::unique_ptr<uint8_t[]> ConvertRGB32F_to_RGBM(const float image_data[], int w, int h,
                                                  int channels);
+
+std::unique_ptr<uint8_t[]> ConvertRGB_to_CoCg_Y(const uint8_t image_data[], int w, int h);
+std::unique_ptr<uint8_t[]> ConvertCoCg_Y_to_RGB(const uint8_t image_data[], int w, int h);
 
 enum class eMipOp {
     Skip = 0,
@@ -126,6 +129,11 @@ void InterleaveUVChannels_16px(const uint8_t *u_src, const uint8_t *v_src, int u
 // DXT compression
 //
 
-void CompressImageDXT1(const uint8_t img_src[], int w, int h, int channels, uint8_t img_dst[]);
-void CompressImageDXT5();
+int GetRequiredMemory_DXT1(int w, int h);
+int GetRequiredMemory_DXT5(int w, int h);
+
+// NOTE: intended for realtime compression, quality might not be the best
+void CompressImage_DXT1(const uint8_t img_src[], int w, int h, int channels,
+                        uint8_t img_dst[]);
+void CompressImage_DXT5(const uint8_t img_src[], int w, int h, uint8_t img_dst[]);
 } // namespace Ren
