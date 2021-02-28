@@ -22,8 +22,15 @@ std::unique_ptr<uint8_t[]> ConvertRGB32F_to_RGBE(const float image_data[], int w
 std::unique_ptr<uint8_t[]> ConvertRGB32F_to_RGBM(const float image_data[], int w, int h,
                                                  int channels);
 
-std::unique_ptr<uint8_t[]> ConvertRGB_to_CoCg_Y(const uint8_t image_data[], int w, int h);
-std::unique_ptr<uint8_t[]> ConvertCoCg_Y_to_RGB(const uint8_t image_data[], int w, int h);
+// Perfectly reversible conversion between RGB and YCoCg (breaks bilinear filtering)
+std::unique_ptr<uint8_t[]> ConvertRGB_to_CoCgxY_rev(const uint8_t image_data[], int w,
+                                                    int h);
+std::unique_ptr<uint8_t[]> ConvertCoCgxY_to_RGB_rev(const uint8_t image_data[], int w,
+                                                    int h);
+
+// Not-so-perfectly reversible conversion between RGB and YCoCg
+std::unique_ptr<uint8_t[]> ConvertRGB_to_CoCgxY(const uint8_t image_data[], int w, int h);
+std::unique_ptr<uint8_t[]> ConvertCoCgxY_to_RGB(const uint8_t image_data[], int w, int h);
 
 enum class eMipOp {
     Skip = 0,

@@ -67,20 +67,59 @@ uint16_t f32_to_f16(const float value) {
     }
 }
 
-int16_t f32_to_s16(float value) { return int16_t(value * 32767); }
+int16_t f32_to_s16(const float value) { return int16_t(value * 32767); }
 
-uint16_t f32_to_u16(float value) { return uint16_t(value * 65535); }
+uint16_t f32_to_u16(const float value) { return uint16_t(value * 65535); }
 
-void rgb_to_YCoCg(const uint8_t rgb[3], uint8_t out_YCoCg[3]) {
-    out_YCoCg[0] = rgb[0] / 4 + rgb[1] / 2 + rgb[2] / 4;
-    out_YCoCg[1] = rgb[0] - rgb[2];
-    out_YCoCg[2] = rgb[1] - (rgb[0] + rgb[2]) / 2;
+void RGB_to_YCoCg_reversible(const uint8_t in_RGB[3], uint8_t out_YCoCg[3]) {
+    out_YCoCg[1] = in_RGB[0] - in_RGB[2];
+    const uint8_t t = in_RGB[2] + (out_YCoCg[1] >> 1);
+    out_YCoCg[2] = in_RGB[1] - t;
+    out_YCoCg[0] = t + (out_YCoCg[2] >> 1);
 }
 
-void YCoCg_to_rgb(const uint8_t YCoCg[3], uint8_t out_rgb[3]) {
-    out_rgb[0] = YCoCg[0] + YCoCg[1] - YCoCg[2];
-    out_rgb[1] = YCoCg[0] + YCoCg[2];
-    out_rgb[2] = YCoCg[0] - YCoCg[1] - YCoCg[2];
+void YCoCg_to_RGB_reversible(const uint8_t in_YCoCg[3], uint8_t out_RGB[3]) {
+    const uint8_t t = in_YCoCg[0] - (in_YCoCg[2] >> 1);
+    out_RGB[1] = in_YCoCg[2] + t;
+    out_RGB[2] = t - (in_YCoCg[1] >> 1);
+    out_RGB[0] = in_YCoCg[1] + out_RGB[2];
+}
+
+void RGB_to_YCoCg(const uint8_t in_RGB[3], uint8_t out_YCoCg[3]) {
+    out_YCoCg[0] = (in_RGB[0] + 2 * in_RGB[1] + in_RGB[2]) / 4;
+    out_YCoCg[1] = 128 + (in_RGB[0] - in_RGB[2]) / 2;
+    out_YCoCg[2] = 128 + (-in_RGB[0] + 2 * in_RGB[1] - in_RGB[2]) / 4;
+}
+
+void YCoCg_to_RGB(const uint8_t in_YCoCg[3], uint8_t out_RGB[3]) {
+    /*const uint8_t t = in_YCoCg[0] - (in_YCoCg[2] >> 1);
+    out_RGB[1] = in_YCoCg[2] + t;
+    out_RGB[2] = t - (in_YCoCg[1] >> 1);
+    out_RGB[0] = in_YCoCg[1] + out_RGB[2];
+    return;*/
+
+    const float offset = 0.5f * 256.0f / 255.0f;
+
+    float fY = in_YCoCg[0] / 255.0f;
+    float fCo = in_YCoCg[1] / 255.0f - offset;
+    float fCg = in_YCoCg[2] / 255.0f - offset;
+
+    out_RGB[0] = (fY + fCo - fCg) * 255.0f;
+    out_RGB[1] = (fY + fCg) * 255.0f;
+    out_RGB[2] = (fY - fCo - fCg) * 255.0f;
+    return;
+
+    const uint8_t _in_YCoCg[] = {in_YCoCg[0], in_YCoCg[1] - 127, in_YCoCg[2] - 127};
+
+    /*const uint8_t t = _in_YCoCg[0] - (_in_YCoCg[2] >> 1);
+    out_RGB[1] = _in_YCoCg[2] + t;
+    out_RGB[2] = t - (_in_YCoCg[1] >> 1);
+    out_RGB[0] = _in_YCoCg[1] + _in_YCoCg[2];
+    return;*/
+
+    out_RGB[0] = _in_YCoCg[0] + _in_YCoCg[1] - _in_YCoCg[2];
+    out_RGB[1] = _in_YCoCg[0] + _in_YCoCg[2];
+    out_RGB[2] = _in_YCoCg[0] - _in_YCoCg[1] - _in_YCoCg[2];
 }
 
 const uint8_t _blank_DXT5_block_4x4[] = {0x00, 0x00, 0x49, 0x92, 0x24, 0x49, 0x92, 0x24,
@@ -341,14 +380,14 @@ std::unique_ptr<uint8_t[]> Ren::ConvertRGB32F_to_RGBM(const float image_data[],
     return u8_data;
 }
 
-std::unique_ptr<uint8_t[]> Ren::ConvertRGB_to_CoCg_Y(const uint8_t image_data[],
-                                                     const int w, const int h) {
+std::unique_ptr<uint8_t[]> Ren::ConvertRGB_to_CoCgxY_rev(const uint8_t image_data[],
+                                                         const int w, const int h) {
     std::unique_ptr<uint8_t[]> u8_data(new uint8_t[w * h * 4]);
 
     for (int y = 0; y < h; y++) {
         for (int x = 0; x < w; x++) {
             uint8_t YCoCg[3];
-            rgb_to_YCoCg(&image_data[(y * w + x) * 3], YCoCg);
+            RGB_to_YCoCg_reversible(&image_data[(y * w + x) * 3], YCoCg);
 
             u8_data[(y * w + x) * 4 + 0] = YCoCg[1];
             u8_data[(y * w + x) * 4 + 1] = YCoCg[2];
@@ -360,7 +399,42 @@ std::unique_ptr<uint8_t[]> Ren::ConvertRGB_to_CoCg_Y(const uint8_t image_data[],
     return u8_data;
 }
 
-std::unique_ptr<uint8_t[]> Ren::ConvertCoCg_Y_to_RGB(const uint8_t image_data[],
+std::unique_ptr<uint8_t[]> Ren::ConvertCoCgxY_to_RGB_rev(const uint8_t image_data[],
+                                                         const int w, const int h) {
+    std::unique_ptr<uint8_t[]> u8_data(new uint8_t[w * h * 3]);
+
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            const uint8_t YCoCg[] = {image_data[(y * w + x) * 4 + 3],
+                                     image_data[(y * w + x) * 4 + 0],
+                                     image_data[(y * w + x) * 4 + 1]};
+            YCoCg_to_RGB_reversible(YCoCg, &u8_data[(y * w + x) * 3]);
+        }
+    }
+
+    return u8_data;
+}
+
+std::unique_ptr<uint8_t[]> Ren::ConvertRGB_to_CoCgxY(const uint8_t image_data[],
+                                                     const int w, const int h) {
+    std::unique_ptr<uint8_t[]> u8_data(new uint8_t[w * h * 4]);
+
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            uint8_t YCoCg[3];
+            RGB_to_YCoCg(&image_data[(y * w + x) * 3], YCoCg);
+
+            u8_data[(y * w + x) * 4 + 0] = YCoCg[1];
+            u8_data[(y * w + x) * 4 + 1] = YCoCg[2];
+            u8_data[(y * w + x) * 4 + 2] = 0;
+            u8_data[(y * w + x) * 4 + 3] = YCoCg[0];
+        }
+    }
+
+    return u8_data;
+}
+
+std::unique_ptr<uint8_t[]> Ren::ConvertCoCgxY_to_RGB(const uint8_t image_data[],
                                                      const int w, const int h) {
     std::unique_ptr<uint8_t[]> u8_data(new uint8_t[w * h * 3]);
 
@@ -369,7 +443,7 @@ std::unique_ptr<uint8_t[]> Ren::ConvertCoCg_Y_to_RGB(const uint8_t image_data[],
             const uint8_t YCoCg[] = {image_data[(y * w + x) * 4 + 3],
                                      image_data[(y * w + x) * 4 + 0],
                                      image_data[(y * w + x) * 4 + 1]};
-            rgb_to_YCoCg(YCoCg, &u8_data[(y * w + x) * 3]);
+            YCoCg_to_RGB(YCoCg, &u8_data[(y * w + x) * 3]);
         }
     }
 
@@ -1546,7 +1620,7 @@ void Ren::CompressImage_DXT1(const uint8_t img_src[], const int w, const int h,
     for (int j = 0; j < h; j += 4, img_src += w * 4 * channels) {
         for (int i = 0; i < w; i += 4) {
             uint8_t block[64];
-            Extract4x4Block(&img_src[i * channels], w * channels, channels, block);
+            Extract4x4Block(&img_src[i * channels], i * channels, channels, block);
 
             uint8_t min_color[4], max_color[4];
             GetMinMaxColorByDistance(block, min_color, max_color);
@@ -1581,7 +1655,7 @@ void Ren::CompressImage_DXT5(const uint8_t img_src[], int w, int h, uint8_t img_
             push_alpha_indices(block, min_color[3], max_color[3], p_out);
 
             //
-            // Write rgb block
+            // Write in_RGB block
             //
 
             push_u16(rgb888_to_rgb565(max_color), p_out);

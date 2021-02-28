@@ -25,7 +25,7 @@ const char SCENE_NAME[] = "assets/scenes/"
 const char SCENE_NAME[] = "assets_pc/scenes/"
 #endif
                           //"skin_test.json";
-                          "living_room_gumroad.json";
+                          "living_room_gumroad_cmp.json";
 //"bistro.json";
 //"pbr_test.json";
 //"zenith.json";
@@ -45,6 +45,11 @@ const char SCENE_NAME[] = "assets_pc/scenes/"
 
 extern "C" {
 #include <Ren/SOIL2/image_DXT.h>
+}
+
+namespace SceneManagerInternal {
+int WriteImage(const uint8_t *out_data, int w, int h, int channels, bool flip_y,
+               bool is_rgbm, const char *name);
 }
 
 GSDrawTest::GSDrawTest(GameBase *game) : GSBaseState(game) {}
@@ -76,7 +81,11 @@ void GSDrawTest::OnPreloadScene(JsObject &js_scene) {
             &src_buf[0], int(src_size), &width, &height, &channels, 0);
 
         std::unique_ptr<uint8_t[]> image_data_YCoCg =
-            Ren::ConvertRGB_to_CoCg_Y(image_data, width, height);
+            Ren::ConvertRGB_to_CoCgxY(image_data, width, height);
+        channels = 4;
+
+        SceneManagerInternal::WriteImage(image_data_YCoCg.get(), width, height, channels,
+                                         false, false, "assets/textures/wall_picture_YCoCg.png");
 
         const int dxt_size_total = Ren::GetRequiredMemory_DXT5(width, height);
 
@@ -88,7 +97,7 @@ void GSDrawTest::OnPreloadScene(JsObject &js_scene) {
         for (int i = 0; i < RepeatCount; i++) {
             // Ren::CompressImage_DXT1(image_data, width, height, channels,
             // img_dst.get());
-            Ren::CompressImage_DXT5(image_data, width, height, img_dst.get());
+            Ren::CompressImage_DXT5(image_data_YCoCg.get(), width, height, img_dst.get());
         }
 
         const uint64_t t2 = Sys::GetTimeUs();
@@ -132,7 +141,7 @@ void GSDrawTest::OnPreloadScene(JsObject &js_scene) {
 
         header.sCaps.dwCaps1 = unsigned(DDSCAPS_TEXTURE) | unsigned(DDSCAPS_MIPMAP);
 
-        std::ofstream out_stream("test.dds", std::ios::binary);
+        std::ofstream out_stream("assets_pc/textures/wall_picture_YCoCg.dds", std::ios::binary);
         out_stream.write((char *)&header, sizeof(header));
 
         /*for (int i = 0; i < mip_count; i++) {
